@@ -202,6 +202,7 @@ searchStore.subscribe((val) => {
   const cleanSearch = lib.str_to_search_regex_str(val).replace(/\s+/g, "|");
   cleanSearchStore.set(cleanSearch);
   searchRegexStore.set(new RegExp(cleanSearch, "gu"));
+  resetManuallyClosed();
   updateVisualTree();
 });
 
@@ -222,6 +223,7 @@ function filterFlattenedEntries() {
       .map((e) => (!subLists ? e.split(CONSTANTS.ARRAY_REGEX)[0] : e))
       .map((e) => (!allRanges ? e.split(CONSTANTS.FEET_REGEX)[0] : e))
   );
+  const currentTree = get(treeStore);
   treeStore.set(
     flattenedEntries.reduce((acc, entry) => {
       let path = "";
@@ -229,6 +231,8 @@ function filterFlattenedEntries() {
         const fullPath = path ? path + "." + part : part;
         path = path ? path + ".children." + part : part;
         if (!foundry.utils.getProperty(acc, path)) {
+          const currentTreePath = fullPath.split(".").join(".children.");
+          const existingNode = foundry.utils.getProperty(currentTree, currentTreePath);
           foundry.utils.setProperty(
             acc,
             path,
@@ -236,7 +240,8 @@ function filterFlattenedEntries() {
               {
                 path: part,
                 fullPath,
-                open: false,
+                open: existingNode?.open ?? false,
+                manuallyClosed: existingNode?.manuallyClosed ?? false,
                 children: {},
               },
               foundry.utils.getProperty(acc, path)
@@ -250,22 +255,41 @@ function filterFlattenedEntries() {
 }
 
 function openTreePath(fullPath, open, openAll = false) {
+  const search = get(searchStore);
   treeStore.update((tree) => {
     const fullTreePath = fullPath.split(".").join(".children.");
     const node = foundry.utils.getProperty(tree, fullTreePath);
     foundry.utils.setProperty(tree, fullTreePath + ".open", open);
+    foundry.utils.setProperty(tree, fullTreePath + ".manuallyClosed", search ? !open : false);
     if ((!open || openAll) && !foundry.utils.isEmpty(node.children)) {
-      recurseOpenTree(node.children, open);
+      recurseOpenTree(node.children, open, search);
     }
     return tree;
   });
 }
 
-function recurseOpenTree(children, open) {
+function recurseOpenTree(children, open, search = false) {
   for (const node of Object.values(children)) {
     node.open = open;
+    node.manuallyClosed = search ? !open : false;
     if (!foundry.utils.isEmpty(node.children)) {
-      recurseOpenTree(node.children, open);
+      recurseOpenTree(node.children, open, search);
+    }
+  }
+}
+
+function resetManuallyClosed() {
+  treeStore.update((tree) => {
+    recurseResetManuallyClosed(tree);
+    return tree;
+  });
+}
+
+function recurseResetManuallyClosed(nodes) {
+  for (const node of Object.values(nodes)) {
+    node.manuallyClosed = false;
+    if (!foundry.utils.isEmpty(node.children)) {
+      recurseResetManuallyClosed(node.children);
     }
   }
 }
@@ -298,7 +322,8 @@ function recurseTree(tree, path = "", depth = 0) {
     const matchParts = lib.make_array_unique(fullPath.match(searchRegex) || []);
     const open =
       data.open ||
-      (search &&
+      (!data.manuallyClosed &&
+        search &&
         (matchParts.length >= searchParts.length ||
           children.filter((e) => e.visible).length));
     let visible = !search || matchParts.length >= searchParts.length;
