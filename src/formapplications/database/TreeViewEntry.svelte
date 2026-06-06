@@ -1,11 +1,12 @@
 <script>
 
-  import { databaseStore } from "./DatabaseStore.js";
+  import { getContext } from "svelte";
 
   export let data;
 
   let localize = game.i18n.localize.bind(game.i18n);
 
+  const databaseStore = getContext("databaseStore");
   const searchRegex = databaseStore.searchRegex;
 
   let flashFilePath = false;

@@ -1,11 +1,12 @@
 <script>
 
   import TreeView from "./TreeView.svelte";
-  import { databaseStore } from "./DatabaseStore.js";
+  import { getContext } from "svelte";
   import * as lib from "../../lib/lib.js";
 
   export let entry;
 
+  const databaseStore = getContext("databaseStore");
   const flattenedEntries = databaseStore.flattenedEntries;
   const search = databaseStore.search;
   const searchRegex = databaseStore.searchRegex;

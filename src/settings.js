@@ -228,7 +228,7 @@ export function registerSettings() {
 			  visible: user_can_do("permissions-sidebar-tools"),
 			  onChange: (event, active) => {
 				  if (active) {
-					  DatabaseViewerApp.show();
+					  DatabaseViewerApp.show({ shiftKey: event?.shiftKey ?? false });
 				  }
 			  },
 		  }

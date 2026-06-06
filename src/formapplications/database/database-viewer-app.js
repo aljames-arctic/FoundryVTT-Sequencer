@@ -39,4 +39,12 @@ export class DatabaseViewerApp extends SvelteApplicationMixin(foundry.applicatio
 	};
 
 	root = DatabaseShell;
+
+	static show(options = {}) {
+		if (!options.shiftKey) {
+			const existingApp = this.getActiveApp();
+			if (existingApp) return existingApp.render({ force: true, focus: true });
+		}
+		return new this(options).render({ force: true, focus: true });
+	}
 }

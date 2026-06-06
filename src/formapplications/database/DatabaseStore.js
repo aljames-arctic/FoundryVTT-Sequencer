@@ -7,9 +7,8 @@ import TreeViewEntry from "./TreeViewEntry.svelte";
 import TreeViewSeparator from "./TreeViewSeparator.svelte";
 import { cleanupSpritesheet, playSpritesheet } from "./renderSpritesheet.js";
 
-let lastFile = false;
-
-function getFileData(entryText) {
+function getFileData(store, entryText) {
+  let lastFile = store._lastFile;
   let entry = SequencerDatabase.getEntry(entryText);
 
   if (Array.isArray(entry)) {
@@ -17,7 +16,7 @@ function getFileData(entryText) {
       entry.splice(entry.indexOf(lastFile), 1);
     }
     entry = lib.random_array_element(entry);
-    lastFile = entry;
+    store._lastFile = entry;
   }
 
   let previewFile = entry?.file ?? entry;
@@ -103,256 +102,251 @@ function copyPath(dbPath, getFilepath, quotes = false) {
 	ui.notifications.info(getFilepath ? "Copied filepath to clipboard!" : "Copied database path to clipboard!");
 }
 
-async function playFile(entry) {
-  await cleanupSpritesheet()
-  const { file, isAudio, isImage, isVideo, isSpritesheet } = getFileData(entry);
-  databaseStore.elements.audio.classList.toggle("hidden", !isAudio);
-  databaseStore.elements.image.classList.toggle("hidden", !isImage && !isSpritesheet);
-  databaseStore.elements.player.classList.toggle("hidden", !isVideo);
+export function createDatabaseStore() {
+  const treeStore = writable({});
+  const visibleTreeStore = writable([]);
+  let flattenedEntries = [];
+  const entriesStore = SequencerDatabase.entriesStore;
+  const packStore = writable(SequencerDatabase.publicModules);
+  const selectedPackStore = writable("all");
+  const searchStore = writable("");
+  const cleanSearchStore = writable("");
+  const searchRegexStore = writable(new RegExp("", "gu"));
 
-  if (isImage) {
-    databaseStore.elements.image.src = file;
-    databaseStore.metadata.set({
-      type: "Image",
-      duration: "n/a",
-    });
-    return;
-  }
-
-  if (isSpritesheet) {
-    playSpritesheet(file, databaseStore);
-    return;
-  }
-
-  const element = isAudio
-    ? databaseStore.elements.audio
-    : databaseStore.elements.player;
-
-  element.onerror = () => {
-    const error = `Sequencer Database Viewer | Could not play file: ${file}`;
-    ui.notifications.error(error);
-    console.error(error);
+  const store = {
+    _lastFile: false,
+    metadata: writable(false),
+    allRanges: writable(false),
+    fileTypes: writable("all"),
+    subLists: writable(false),
+    listView: writable(false),
+    packStore: packStore,
+    selectedPackStore: selectedPackStore,
+    visibleTreeStore: visibleTreeStore,
+    search: searchStore,
+    cleanSearchStore: cleanSearchStore,
+    searchRegex: searchRegexStore,
+    elements: {},
+    cleanupSpritesheet() { cleanupSpritesheet(true) },
+    copyPath,
+    playFile,
+    openTreePath,
+    destroy,
   };
 
-  element.oncanplay = () => {
-    element.play();
-  };
+  async function playFile(entry) {
+    await cleanupSpritesheet();
+    const { file, isAudio, isImage, isVideo, isSpritesheet } = getFileData(store, entry);
+    store.elements.audio.classList.toggle("hidden", !isAudio);
+    store.elements.image.classList.toggle("hidden", !isImage && !isSpritesheet);
+    store.elements.player.classList.toggle("hidden", !isVideo);
 
-  element.onloadedmetadata = () => {
-    databaseStore.metadata.set({
-      type: isVideo ? "Video" : isAudio ? "Audio" : "Image",
-      duration: isImage ? "n/a" : element.duration * 1000 + "ms",
-    });
-  };
-
-  element.src = file;
-}
-
-
-const treeStore = writable({});
-const visibleTreeStore = writable([]);
-let flattenedEntries = [];
-const entriesStore = SequencerDatabase.entriesStore;
-const packStore = writable(SequencerDatabase.publicModules);
-const selectedPackStore = writable("all");
-const searchStore = writable("");
-const cleanSearchStore = writable("");
-const searchRegexStore = writable(new RegExp("", "gu"));
-
-SequencerDatabase.entriesStore.subscribe(() => {
-  packStore.set(SequencerDatabase.publicModules);
-});
-
-const databaseStore = {
-  metadata: writable(false),
-  allRanges: writable(false),
-  fileTypes: writable("all"),
-  subLists: writable(false),
-  listView: writable(false),
-  packStore: packStore,
-  selectedPackStore: selectedPackStore,
-  visibleTreeStore: visibleTreeStore,
-  search: searchStore,
-  cleanSearchStore: cleanSearchStore,
-  searchRegex: searchRegexStore,
-  elements: {},
-  cleanupSpritesheet() { cleanupSpritesheet(true) },
-  copyPath,
-  playFile,
-  openTreePath,
-};
-
-entriesStore.subscribe(() => {
-  filterFlattenedEntries();
-});
-
-databaseStore.allRanges.subscribe(() => {
-  filterFlattenedEntries();
-});
-
-databaseStore.subLists.subscribe(() => {
-  filterFlattenedEntries();
-});
-
-databaseStore.selectedPackStore.subscribe(() => {
-  filterFlattenedEntries();
-});
-
-searchStore.subscribe((val) => {
-  const cleanSearch = lib.str_to_search_regex_str(val).replace(/\s+/g, "|");
-  cleanSearchStore.set(cleanSearch);
-  searchRegexStore.set(new RegExp(cleanSearch, "gu"));
-  resetManuallyClosed();
-  updateVisualTree();
-});
-
-function filterFlattenedEntries() {
-  const selectedPack = get(selectedPackStore);
-  const search = get(searchStore);
-  const searchRegex = get(searchRegexStore);
-  const subLists = get(databaseStore.subLists);
-  const allRanges = get(databaseStore.allRanges);
-  flattenedEntries = lib.make_array_unique(
-    SequencerDatabase.publicFlattenedEntries
-      .filter((e) => {
-        return (
-          (selectedPack === "all" || e.startsWith(selectedPack + ".")) &&
-          (!search || e.match(searchRegex))
-        );
-      })
-      .map((e) => (!subLists ? e.split(CONSTANTS.ARRAY_REGEX)[0] : e))
-      .map((e) => (!allRanges ? e.split(CONSTANTS.FEET_REGEX)[0] : e))
-  );
-  const currentTree = get(treeStore);
-  treeStore.set(
-    flattenedEntries.reduce((acc, entry) => {
-      let path = "";
-      for (const part of entry.split(".")) {
-        const fullPath = path ? path + "." + part : part;
-        path = path ? path + ".children." + part : part;
-        if (!foundry.utils.getProperty(acc, path)) {
-          const currentTreePath = fullPath.split(".").join(".children.");
-          const existingNode = foundry.utils.getProperty(currentTree, currentTreePath);
-          foundry.utils.setProperty(
-            acc,
-            path,
-            foundry.utils.mergeObject(
-              {
-                path: part,
-                fullPath,
-                open: existingNode?.open ?? false,
-                manuallyClosed: existingNode?.manuallyClosed ?? false,
-                children: {},
-              },
-              foundry.utils.getProperty(acc, path)
-            )
-          );
-        }
-      }
-      return acc;
-    }, {})
-  );
-}
-
-function openTreePath(fullPath, open, openAll = false) {
-  const search = get(searchStore);
-  treeStore.update((tree) => {
-    const fullTreePath = fullPath.split(".").join(".children.");
-    const node = foundry.utils.getProperty(tree, fullTreePath);
-    foundry.utils.setProperty(tree, fullTreePath + ".open", open);
-    foundry.utils.setProperty(tree, fullTreePath + ".manuallyClosed", search ? !open : false);
-    if ((!open || openAll) && !foundry.utils.isEmpty(node.children)) {
-      recurseOpenTree(node.children, open, search);
-    }
-    return tree;
-  });
-}
-
-function recurseOpenTree(children, open, search = false) {
-  for (const node of Object.values(children)) {
-    node.open = open;
-    node.manuallyClosed = search ? !open : false;
-    if (!foundry.utils.isEmpty(node.children)) {
-      recurseOpenTree(node.children, open, search);
-    }
-  }
-}
-
-function resetManuallyClosed() {
-  treeStore.update((tree) => {
-    recurseResetManuallyClosed(tree);
-    return tree;
-  });
-}
-
-function recurseResetManuallyClosed(nodes) {
-  for (const node of Object.values(nodes)) {
-    node.manuallyClosed = false;
-    if (!foundry.utils.isEmpty(node.children)) {
-      recurseResetManuallyClosed(node.children);
-    }
-  }
-}
-
-treeStore.subscribe(() => {
-  updateVisualTree();
-});
-
-function updateVisualTree() {
-  const tree = get(treeStore);
-  const visibleTree = recurseTree(tree)
-    .deepFlatten()
-    .filter((e) => e.visible);
-  visibleTreeStore.set(visibleTree);
-}
-
-function recurseTree(tree, path = "", depth = 0) {
-  const search = get(searchStore);
-  const searchRegex = get(searchRegexStore);
-  const searchParts = get(cleanSearchStore).split("|");
-  return Object.entries(tree).map(([key, data]) => {
-    const fullPath = path ? path + "." + key : key;
-
-    const children = recurseTree(
-      data.children,
-      fullPath,
-      depth + 1
-    ).deepFlatten();
-
-    const matchParts = lib.make_array_unique(fullPath.match(searchRegex) || []);
-    const open =
-      data.open ||
-      (!data.manuallyClosed &&
-        search &&
-        (matchParts.length >= searchParts.length ||
-          children.filter((e) => e.visible).length));
-    let visible = !search || matchParts.length >= searchParts.length;
-
-    if (visible) {
-      children.forEach((e) => (e.visible = true));
-    } else {
-      visible = children.filter((e) => e.visible).length;
+    if (isImage) {
+      store.elements.image.src = file;
+      store.metadata.set({
+        type: "Image",
+        duration: "n/a",
+      });
+      return;
     }
 
-    const entry = {
-      class: TreeViewEntry,
-      path: key,
-      fullPath: fullPath,
-      open,
-      visible,
-      hasChildren: !foundry.utils.isEmpty(data.children),
-      depth,
+    if (isSpritesheet) {
+      playSpritesheet(file, store);
+      return;
+    }
+
+    const element = isAudio
+      ? store.elements.audio
+      : store.elements.player;
+
+    element.onerror = () => {
+      const error = `Sequencer Database Viewer | Could not play file: ${file}`;
+      ui.notifications.error(error);
+      console.error(error);
     };
 
-    const leaf = [entry];
-    if ((data.open || entry.open) && entry.hasChildren) {
-      leaf.push(...children, {
-        fullPath: foundry.utils.randomID(),
-        class: TreeViewSeparator,
-      });
-    }
-    return leaf;
-  });
-}
+    element.oncanplay = () => {
+      element.play();
+    };
 
-export { databaseStore };
+    element.onloadedmetadata = () => {
+      store.metadata.set({
+        type: isVideo ? "Video" : isAudio ? "Audio" : "Image",
+        duration: isImage ? "n/a" : element.duration * 1000 + "ms",
+      });
+    };
+
+    element.src = file;
+  }
+
+  function filterFlattenedEntries() {
+    const selectedPack = get(selectedPackStore);
+    const search = get(searchStore);
+    const searchRegex = get(searchRegexStore);
+    const subLists = get(store.subLists);
+    const allRanges = get(store.allRanges);
+    flattenedEntries = lib.make_array_unique(
+      SequencerDatabase.publicFlattenedEntries
+        .filter((e) => {
+          return (
+            (selectedPack === "all" || e.startsWith(selectedPack + ".")) &&
+            (!search || e.match(searchRegex))
+          );
+        })
+        .map((e) => (!subLists ? e.split(CONSTANTS.ARRAY_REGEX)[0] : e))
+        .map((e) => (!allRanges ? e.split(CONSTANTS.FEET_REGEX)[0] : e))
+    );
+    const currentTree = get(treeStore);
+    treeStore.set(
+      flattenedEntries.reduce((acc, entry) => {
+        let path = "";
+        for (const part of entry.split(".")) {
+          const fullPath = path ? path + "." + part : part;
+          path = path ? path + ".children." + part : part;
+          if (!foundry.utils.getProperty(acc, path)) {
+            const currentTreePath = fullPath.split(".").join(".children.");
+            const existingNode = foundry.utils.getProperty(currentTree, currentTreePath);
+            foundry.utils.setProperty(
+              acc,
+              path,
+              foundry.utils.mergeObject(
+                {
+                  path: part,
+                  fullPath,
+                  open: existingNode?.open ?? false,
+                  manuallyClosed: existingNode?.manuallyClosed ?? false,
+                  children: {},
+                },
+                foundry.utils.getProperty(acc, path)
+              )
+            );
+          }
+        }
+        return acc;
+      }, {})
+    );
+  }
+
+  function openTreePath(fullPath, open, openAll = false) {
+    const search = get(searchStore);
+    treeStore.update((tree) => {
+      const fullTreePath = fullPath.split(".").join(".children.");
+      const node = foundry.utils.getProperty(tree, fullTreePath);
+      foundry.utils.setProperty(tree, fullTreePath + ".open", open);
+      foundry.utils.setProperty(tree, fullTreePath + ".manuallyClosed", search ? !open : false);
+      if ((!open || openAll) && !foundry.utils.isEmpty(node.children)) {
+        recurseOpenTree(node.children, open, search);
+      }
+      return tree;
+    });
+  }
+
+  function recurseOpenTree(children, open, search = false) {
+    for (const node of Object.values(children)) {
+      node.open = open;
+      node.manuallyClosed = search ? !open : false;
+      if (!foundry.utils.isEmpty(node.children)) {
+        recurseOpenTree(node.children, open, search);
+      }
+    }
+  }
+
+  function resetManuallyClosed() {
+    treeStore.update((tree) => {
+      recurseResetManuallyClosed(tree);
+      return tree;
+    });
+  }
+
+  function recurseResetManuallyClosed(nodes) {
+    for (const node of Object.values(nodes)) {
+      node.manuallyClosed = false;
+      if (!foundry.utils.isEmpty(node.children)) {
+        recurseResetManuallyClosed(node.children);
+      }
+    }
+  }
+
+  function updateVisualTree() {
+    const tree = get(treeStore);
+    const visibleTree = recurseTree(tree)
+      .deepFlatten()
+      .filter((e) => e.visible);
+    visibleTreeStore.set(visibleTree);
+  }
+
+  function recurseTree(tree, path = "", depth = 0) {
+    const search = get(searchStore);
+    const searchRegex = get(searchRegexStore);
+    const searchParts = get(cleanSearchStore).split("|");
+    return Object.entries(tree).map(([key, data]) => {
+      const fullPath = path ? path + "." + key : key;
+
+      const children = recurseTree(
+        data.children,
+        fullPath,
+        depth + 1
+      ).deepFlatten();
+
+      const matchParts = lib.make_array_unique(fullPath.match(searchRegex) || []);
+      const open =
+        data.open ||
+        (!data.manuallyClosed &&
+          search &&
+          (matchParts.length >= searchParts.length ||
+            children.filter((e) => e.visible).length));
+      let visible = !search || matchParts.length >= searchParts.length;
+
+      if (visible) {
+        children.forEach((e) => (e.visible = true));
+      } else {
+        visible = children.filter((e) => e.visible).length;
+      }
+
+      const entry = {
+        class: TreeViewEntry,
+        path: key,
+        fullPath: fullPath,
+        open,
+        visible,
+        hasChildren: !foundry.utils.isEmpty(data.children),
+        depth,
+      };
+
+      const leaf = [entry];
+      if ((data.open || entry.open) && entry.hasChildren) {
+        leaf.push(...children, {
+          fullPath: foundry.utils.randomID(),
+          class: TreeViewSeparator,
+        });
+      }
+      return leaf;
+    });
+  }
+
+  // Wire up subscriptions and keep references so we can unsubscribe on destroy
+  const unsubscribers = [
+    entriesStore.subscribe(() => {
+      packStore.set(SequencerDatabase.publicModules);
+      filterFlattenedEntries();
+    }),
+    store.allRanges.subscribe(() => filterFlattenedEntries()),
+    store.subLists.subscribe(() => filterFlattenedEntries()),
+    store.selectedPackStore.subscribe(() => filterFlattenedEntries()),
+    searchStore.subscribe((val) => {
+      const cleanSearch = lib.str_to_search_regex_str(val).replace(/\s+/g, "|");
+      cleanSearchStore.set(cleanSearch);
+      searchRegexStore.set(new RegExp(cleanSearch, "gu"));
+      resetManuallyClosed();
+      updateVisualTree();
+    }),
+    treeStore.subscribe(() => updateVisualTree()),
+  ];
+
+  function destroy() {
+    for (const unsub of unsubscribers) unsub();
+    store.cleanupSpritesheet();
+  }
+
+  return store;
+}

@@ -1,14 +1,17 @@
 <script>
 
-  import { onDestroy } from "svelte";
+  import { onDestroy, setContext } from "svelte";
 
   import DatabaseEntry from "./DatabaseEntry.svelte";
   import VirtualScroll from "svelte-virtual-scroll-list";
 
   import SequencerDatabase from "../../modules/sequencer-database.js";
-  import { databaseStore } from "./DatabaseStore.js";
+  import { createDatabaseStore } from "./DatabaseStore.js";
   import * as lib from "../../lib/lib.js";
   import CONSTANTS from "../../constants.js";
+
+  const databaseStore = createDatabaseStore();
+  setContext("databaseStore", databaseStore);
 
 	let localize = game.i18n.localize.bind(game.i18n);
 
@@ -76,7 +79,7 @@
     });
   }
 
-  onDestroy(() => databaseStore.cleanupSpritesheet());
+  onDestroy(() => databaseStore.destroy());
 </script>
 
 <div class="sequencer-database-content">
